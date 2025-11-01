@@ -170,13 +170,82 @@ client.on("messageCreate", async (message) => {
     return; // ✅ Gemini 로직으로 안넘어감
   }
 
-  // === 💬 일반 대화 (Gemini) ===
-  const contentText = content.trim();
-  if (!contentText) {
+ client.on("messageCreate", async (message) => {
+  if (message.author.bot) return;
+  if (!message.mentions.has(client.user)) return; // 봇 멘션 없으면 무시
+
+  // --- 멘션 이후의 텍스트 추출 ---
+  const content = message.content.replace(`<@${client.user.id}>`, "").trim();
+
+  // === 🧮 오늘 채팅 개수 ===
+  if (content.includes("오늘 채팅친 개수")) {
+    const now = new Date();
+    const start = new Date(now.setHours(0, 0, 0, 0));
+    const end = new Date(now.setHours(23, 59, 59, 999));
+
+    let count = 0;
+    let lastId;
+
+    while (true) {
+      const options = { limit: 100 };
+      if (lastId) options.before = lastId;
+      const msgs = await message.channel.messages.fetch(options);
+      if (msgs.size === 0) break;
+
+      const filtered = msgs.filter(
+        (msg) =>
+          msg.createdTimestamp >= start.getTime() &&
+          msg.createdTimestamp <= end.getTime()
+      );
+
+      count += filtered.size;
+      lastId = msgs.last().id;
+      if (msgs.last().createdTimestamp < start.getTime()) break;
+    }
+
+    await message.reply(`💬 오늘 채팅이 오고 간 개수는 **${count.toLocaleString()}개** 입니다.`);
+    return; // ✅ 여기서 완전히 중단 (Gemini 안감)
+  }
+
+  // === 🧮 어제 채팅 개수 ===
+  if (content.includes("어제 채팅친 개수")) {
+    const now = new Date();
+    const yesterdayStart = new Date(now.setDate(now.getDate() - 1));
+    yesterdayStart.setHours(0, 0, 0, 0);
+    const yesterdayEnd = new Date(yesterdayStart);
+    yesterdayEnd.setHours(23, 59, 59, 999);
+
+    let count = 0;
+    let lastId;
+
+    while (true) {
+      const options = { limit: 100 };
+      if (lastId) options.before = lastId;
+      const msgs = await message.channel.messages.fetch(options);
+      if (msgs.size === 0) break;
+
+      const filtered = msgs.filter(
+        (msg) =>
+          msg.createdTimestamp >= yesterdayStart.getTime() &&
+          msg.createdTimestamp <= yesterdayEnd.getTime()
+      );
+
+      count += filtered.size;
+      lastId = msgs.last().id;
+      if (msgs.last().createdTimestamp < yesterdayStart.getTime()) break;
+    }
+
+    await message.reply(`💬 어제 채팅이 오고 간 개수는 **${count.toLocaleString()}개** 입니다.`);
+    return; // ✅ 여기서 완전히 중단 (Gemini 안감)
+  }
+
+  // === 💬 나머지는 Gemini 처리 ===
+  if (!content) {
     await message.reply("내용이랑 같이 해줄 수 있어? :D");
     return;
   }
 
+  // ✅ 이 아래는 오직 Gemini만 작동
   const waitMsg = await message.reply("<a:Loading:1433912890649215006> 좋은 답변 생성 중...");
 
   try {
@@ -194,7 +263,7 @@ client.on("messageCreate", async (message) => {
 너는 내 친구야.
 따뜻하고 자연스러운 한국어로, 친구처럼 말하듯 대화해줘.
 너무 딱딱하지 않게 감정 표현이나 유머도 괜찮아.
-내가 묻고 싶은 건 이거야: ${contentText}
+내가 묻고 싶은 건 이거야: ${content}
                   `.trim(),
                 },
               ],
@@ -597,6 +666,7 @@ client.on("messageCreate", async (message) => {
 
 // === 실행 ===
 client.login(process.env.DISCORD_TOKEN);
+
 
 
 
