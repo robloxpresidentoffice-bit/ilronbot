@@ -131,7 +131,7 @@ client.on("messageCreate", async (message) => {
       if (msgs.last().createdTimestamp < start.getTime()) break;
     }
 
-    await message.reply(`💬 오늘 채팅이 오고 간 개수는 **${count.toLocaleString()}개** 입니다.`);
+    await message.reply(`오늘 채팅이 오고 간 개수는 **${count.toLocaleString()}개** 입니다.`);
     return; // ✅ 여기서 완전히 중단 (Gemini 안감)
   }
 
@@ -163,7 +163,7 @@ client.on("messageCreate", async (message) => {
       if (msgs.last().createdTimestamp < yesterdayStart.getTime()) break;
     }
 
-    await message.reply(`💬 어제 채팅이 오고 간 개수는 **${count.toLocaleString()}개** 입니다.`);
+    await message.reply(`어제 채팅이 오고 간 개수는 **${count.toLocaleString()}개** 입니다.`);
     return; // ✅ 여기서 완전히 중단 (Gemini 안감)
   }
 
@@ -594,6 +594,7 @@ client.on("messageCreate", async (message) => {
 
 // === 실행 ===
 client.login(process.env.DISCORD_TOKEN);
+
 
 
 
