@@ -98,84 +98,139 @@ client.on("inviteDelete", async (invite) => {
   invites.set(invite.guild.id, guildInvites);
 });
 
-// === 1️⃣ Gemini 대화 ===
 client.on("messageCreate", async (message) => {
   if (message.author.bot) return;
+  if (!message.mentions.has(client.user)) return;
 
-  // @everyone, @here 무시
-  if (
-    message.mentions.has(client.user) &&
-    !message.mentions.everyone &&
-    !message.content.includes("@here")
-  ) {
-    const content = message.content.replace(`<@${client.user.id}>`, "").trim();
+  const content = message.content.replace(`<@${client.user.id}>`, "").trim();
 
-    if (!content) {
-      await message.reply("내용이랑 같이 해줄 수 있어? :D");
-      return;
+  // === 🧮 오늘 채팅 개수 ===
+  if (content.includes("오늘 채팅친 개수")) {
+    const now = new Date();
+    const start = new Date(now.setHours(0, 0, 0, 0));
+    const end = new Date(now.setHours(23, 59, 59, 999));
+
+    let count = 0;
+    let lastId;
+
+    while (true) {
+      const options = { limit: 100 };
+      if (lastId) options.before = lastId;
+
+      const msgs = await message.channel.messages.fetch(options);
+      if (msgs.size === 0) break;
+
+      const filtered = msgs.filter(
+        (msg) =>
+          msg.createdTimestamp >= start.getTime() &&
+          msg.createdTimestamp <= end.getTime()
+      );
+
+      count += filtered.size;
+      lastId = msgs.last().id;
+
+      if (msgs.last().createdTimestamp < start.getTime()) break;
     }
 
-    await message.channel.sendTyping();
+    await message.reply(`💬 오늘 채팅이 오고 간 개수는 **${count.toLocaleString()}개** 입니다.`);
+    return; // ✅ Gemini 로직으로 안넘어감
+  }
 
-    const thinkingMsg = await message.channel.send(
-      "<a:Loading:1433912890649215006> 더 나은 답변 생각 중..."
-    );
+  // === 🧮 어제 채팅 개수 ===
+  if (content.includes("어제 채팅친 개수")) {
+    const now = new Date();
+    const yesterdayStart = new Date(now.setDate(now.getDate() - 1));
+    yesterdayStart.setHours(0, 0, 0, 0);
+    const yesterdayEnd = new Date(yesterdayStart);
+    yesterdayEnd.setHours(23, 59, 59, 999);
 
-    try {
-      const url = `https://generativelanguage.googleapis.com/v1/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`;
-      const body = {
-        contents: [
-          {
-            parts: [
-              {
-                text: `
+    let count = 0;
+    let lastId;
+
+    while (true) {
+      const options = { limit: 100 };
+      if (lastId) options.before = lastId;
+
+      const msgs = await message.channel.messages.fetch(options);
+      if (msgs.size === 0) break;
+
+      const filtered = msgs.filter(
+        (msg) =>
+          msg.createdTimestamp >= yesterdayStart.getTime() &&
+          msg.createdTimestamp <= yesterdayEnd.getTime()
+      );
+
+      count += filtered.size;
+      lastId = msgs.last().id;
+
+      if (msgs.last().createdTimestamp < yesterdayStart.getTime()) break;
+    }
+
+    await message.reply(`💬 어제 채팅이 오고 간 개수는 **${count.toLocaleString()}개** 입니다.`);
+    return; // ✅ Gemini 로직으로 안넘어감
+  }
+
+  // === 💬 일반 대화 (Gemini) ===
+  const contentText = content.trim();
+  if (!contentText) {
+    await message.reply("내용이랑 같이 해줄 수 있어? :D");
+    return;
+  }
+
+  const waitMsg = await message.reply("<a:Loading:1433912890649215006> 좋은 답변 생성 중...");
+
+  try {
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1/models/gemini-2.0-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [
+            {
+              parts: [
+                {
+                  text: `
 너는 내 친구야.
 따뜻하고 자연스러운 한국어로, 친구처럼 말하듯 대화해줘.
 너무 딱딱하지 않게 감정 표현이나 유머도 괜찮아.
-내가 묻고 싶은 건 이거야: ${content}
-                `.trim(),
-              },
-            ],
-          },
-        ],
-      };
-
-      const res = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-
-      const data = await res.json();
-
-      if (!res.ok) {
-        console.error("❌ Gemini API 오류:", JSON.stringify(data, null, 2));
-        return thinkingMsg.edit(
-          `<:Warning:1429715991591387146> API 오류: ${
-            data.error?.message || "알 수 없는 오류입니다."
-          }`
-        );
+내가 묻고 싶은 건 이거야: ${contentText}
+                  `.trim(),
+                },
+              ],
+            },
+          ],
+        }),
       }
+    );
 
-      const answer =
-        data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ||
-        "<:Warning:1429715991591387146> 답변을 생성할 수 없어요.";
+    const data = await res.json();
 
-      const embed = new EmbedBuilder()
-        .setAuthor({
-          name: message.author.username,
-          iconURL: message.author.displayAvatarURL(),
-        })
-        .setTitle("일런봇의 답변")
-        .setDescription(answer)
-        .setColor("#3e22a3")
-        .setTimestamp();
-
-      await thinkingMsg.edit({ content: "", embeds: [embed] });
-    } catch (err) {
-      console.error("❌ 요청 중 오류:", err);
-      await thinkingMsg.edit("⚠️ 오류가 발생했습니다.");
+    if (!res.ok) {
+      console.error("❌ Gemini API 오류:", data);
+      return waitMsg.edit(
+        `<:Warning:1429715991591387146> API 오류: ${data.error?.message || "알 수 없는 오류입니다."}`
+      );
     }
+
+    const answer =
+      data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ||
+      "<:Warning:1429715991591387146> 답변을 생성할 수 없어요.";
+
+    const embed = new EmbedBuilder()
+      .setAuthor({
+        name: message.author.username,
+        iconURL: message.author.displayAvatarURL(),
+      })
+      .setTitle("일런봇의 답변")
+      .setDescription(answer)
+      .setColor("#3e22a3")
+      .setTimestamp();
+
+    await waitMsg.edit({ content: "", embeds: [embed] });
+  } catch (err) {
+    console.error("❌ 요청 오류:", err);
+    await waitMsg.edit("⚠️ 오류가 발생했습니다.");
   }
 });
 
@@ -542,5 +597,6 @@ client.on("messageCreate", async (message) => {
 
 // === 실행 ===
 client.login(process.env.DISCORD_TOKEN);
+
 
 
