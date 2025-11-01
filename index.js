@@ -284,6 +284,37 @@ async function checkReactions() {
 // ✅ 10초마다 반응 상태 체크
 setInterval(checkReactions, 10000);
 
+// === ✅ 디스플레이 이름 자동 스캔 루프 ===
+async function syncDisplayNames() {
+  try {
+    for (const [, guild] of client.guilds.cache) {
+      const members = await guild.members.fetch();
+
+      for (const [, member] of members) {
+        // 🧩 닉네임과 표시 이름이 다르면 갱신
+        const displayBase =
+          member.user.globalName ||
+          member.displayName ||
+          member.nickname ||
+          member.user.username;
+
+        // 닉네임이 표시이름 기반 규칙과 다르면 업데이트
+        const hasPrefix = /^ん\[.*?\]/.test(member.displayName);
+        if (member.displayName !== displayBase || hasPrefix) {
+          await updateNickname(member);
+          await new Promise((r) => setTimeout(r, 500)); // API 제한 방지
+        }
+      }
+    }
+    console.log("✅ DisplayName 자동 동기화 완료");
+  } catch (err) {
+    console.error("❌ DisplayName 동기화 오류:", err);
+  }
+}
+
+// === 1분마다 전체 스캔 실행 ===
+setInterval(syncDisplayNames, 60 * 1000);
+
 // === 3️⃣ 입장 로그 ===
 client.on("guildMemberAdd", async (member) => {
   const joinChannel = member.guild.channels.cache.get(JOIN_LOG_CHANNEL);
@@ -497,3 +528,4 @@ client.on("messageCreate", async (message) => {
 
 // === 실행 ===
 client.login(process.env.DISCORD_TOKEN);
+
