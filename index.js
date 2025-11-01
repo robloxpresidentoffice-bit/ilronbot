@@ -1,3 +1,17 @@
+import express from "express";
+
+// === ✅ Render keep-alive용 웹 서버 ===
+const app = express();
+const PORT = process.env.PORT || 10000; // Render 기본 포트
+
+app.get("/", (req, res) => {
+  res.send("✅ Discord bot is running!");
+});
+
+app.listen(PORT, () => {
+  console.log(`🌐 Keep-alive server running on port ${PORT}`);
+});
+
 import {
   Client,
   GatewayIntentBits,
@@ -528,4 +542,5 @@ client.on("messageCreate", async (message) => {
 
 // === 실행 ===
 client.login(process.env.DISCORD_TOKEN);
+
 
