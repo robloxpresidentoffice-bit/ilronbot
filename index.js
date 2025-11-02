@@ -30,7 +30,7 @@ const client = new Client({
     GatewayIntentBits.MessageContent,
     GatewayIntentBits.GuildMessageReactions,
   ],
-  partials: ["MESSAGE", "CHANNEL", "REACTION"],
+  partials: ["MESSAGE", "CHANNEL", "REACTION", "GUILD_MEMBER", "USER"], // ✅ 필수
 });
 
 const invites = new Map();
@@ -202,23 +202,89 @@ client.on("messageCreate", async (message) => {
   }
 });
 
-// ✅ 인증 반응 시 역할 지급
 client.on("messageReactionAdd", async (reaction, user) => {
-  if (user.bot) return;
-  const guild = reaction.message.guild;
-  if (!guild || guild.id !== MAIN_GUILD_ID) return;
-
-  if (reaction.emoji.name !== "✅") return;
-  const role = guild.roles.cache.get(VERIFY_ROLE_ID);
-  if (!role) return;
-
   try {
+    if (user.bot) return;
+
+    // ✅ partial 처리 (반응 캐시가 비었을 때)
+    if (reaction.partial) await reaction.fetch();
+    if (reaction.message.partial) await reaction.message.fetch();
+
+    const guild = reaction.message.guild;
+    if (!guild || guild.id !== MAIN_GUILD_ID) return;
+
+    // ✅ 인증 채널 & 메시지 확인
+    const isVerifyReaction =
+      (reaction.message.channelId === VERIFY_CHANNEL_ID && reaction.emoji.name === "✅") ||
+      (reaction.message.id === "1434239630248513546" && reaction.emoji.name === "✅");
+
+    if (!isVerifyReaction) return;
+
     const member = await guild.members.fetch(user.id);
-    if (!member.roles.cache.has(role.id)) await member.roles.add(role);
+    const role = guild.roles.cache.get(VERIFY_ROLE_ID);
+    if (!role) return console.warn("⚠️ 역할을 찾을 수 없습니다.");
+
+    // ✅ 역할 부여
+    if (!member.roles.cache.has(role.id)) {
+      await member.roles.add(role);
+      console.log(`🎉 ${member.user.tag} 님에게 '${role.name}' 역할 지급 완료!`);
+    }
   } catch (err) {
-    console.warn(`⚠️ ${user.username} 역할 추가 실패: ${err.message}`);
+    console.error("❌ 인증 반응 처리 중 오류:", err);
   }
 });
+client.on("guildMemberUpdate", async (oldMember, newMember) => {
+  if (newMember.guild.id !== MAIN_GUILD_ID) return;
+
+  const oldRoles = oldMember.roles.cache.map(r => r.id);
+  const newRoles = newMember.roles.cache.map(r => r.id);
+
+  // ✅ 역할 변경 감지
+  const changed =
+    oldRoles.length !== newRoles.length ||
+    !oldRoles.every(id => newRoles.includes(id));
+
+  if (!changed) return;
+
+  // ✅ 닉네임 갱신 로직
+  try {
+    const priorityRoles = [
+      "1431223211785195663",
+      "1431223251572494453",
+      "1431223290269274225",
+      "1431223359693389944",
+      "1431223412533235753",
+      "1431223468271206513",
+      "1431223559690260520",
+    ];
+
+    const topRole = newMember.roles.cache
+      .filter(r => priorityRoles.includes(r.id))
+      .sort((a, b) => priorityRoles.indexOf(a.id) - priorityRoles.indexOf(b.id))
+      .first();
+
+    if (!topRole) return;
+
+    const baseName =
+      newMember.nickname ||
+      newMember.user.globalName ||
+      newMember.displayName ||
+      newMember.user.username;
+
+    const cleanBase = baseName.replace(/^ん\[.*?\]\s*/g, "").trim();
+    const newNickname = `ん[${topRole.name}] ${cleanBase}`;
+
+    if (newMember.nickname !== newNickname) {
+      await newMember.setNickname(newNickname);
+      console.log(`✅ ${newMember.user.tag} → ${newNickname}`);
+    }
+  } catch (err) {
+    if (err.code === 50013)
+      console.warn(`⚠️ ${newMember.user.tag} 닉네임 변경 권한 부족`);
+    else console.error("❌ 닉네임 변경 실패:", err);
+  }
+});
+
 
 // ✅ 입퇴장 로그
 client.on("guildMemberAdd", async (member) => {
@@ -254,3 +320,4 @@ client.on("guildMemberRemove", async (member) => {
 });
 
 client.login(process.env.DISCORD_TOKEN);
+
