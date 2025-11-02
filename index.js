@@ -18,6 +18,17 @@ const JOIN_LOG_CHANNEL = "1433902671005487275";
 const LEAVE_LOG_CHANNEL = "1433902689430802442";
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 
+// === 닉네임 접두사용 역할 우선순위 ===
+const ROLE_PRIORITY = [
+  "1431223211785195663",
+  "1431223251572494453",
+  "1431223290269274225",
+  "1431223359693389944",
+  "1431223412533235753",
+  "1431223468271206513",
+  "1431223559690260520",
+];
+
 // === 클라이언트 ===
 const client = new Client({
   intents: [
@@ -68,13 +79,13 @@ client.once("ready", async () => {
   async function checkVerifyReactions() {
     try {
       const guild = client.guilds.cache.get(MAIN_GUILD_ID);
-      if (!guild) return console.warn("⚠️ 메인 서버를 찾을 수 없습니다.");
+      if (!guild) return;
 
       const channel = guild.channels.cache.get(VERIFY_CHANNEL_ID);
-      if (!channel) return console.warn("⚠️ 인증 채널을 찾을 수 없습니다.");
+      if (!channel) return;
 
       const message = await channel.messages.fetch(VERIFY_MESSAGE_ID);
-      if (!message) return console.warn("⚠️ 인증 메시지를 찾을 수 없습니다.");
+      if (!message) return;
 
       const reaction = message.reactions.cache.get("✅");
       if (!reaction) return;
@@ -89,9 +100,13 @@ client.once("ready", async () => {
             const member = await guild.members.fetch(userId);
             const role = guild.roles.cache.get(VERIFY_ROLE_ID);
             if (!role) continue;
+
             if (!member.roles.cache.has(role.id)) {
               await member.roles.add(role);
               console.log(`🎉 ${member.user.tag} 님에게 '${role.name}' 역할 지급 완료`);
+
+              // ✅ 역할명 기반 닉네임 변경
+              await updateNickname(member);
             }
           } catch (err) {
             console.warn(`⚠️ ${userId} 처리 실패: ${err.message}`);
@@ -105,8 +120,37 @@ client.once("ready", async () => {
     }
   }
 
-  setInterval(checkVerifyReactions, 1000);
+  setInterval(checkVerifyReactions, 3000);
 });
+
+// === 💫 닉네임 업데이트 ===
+async function updateNickname(member) {
+  try {
+    const roles = member.roles.cache
+      .filter((r) => ROLE_PRIORITY.includes(r.id))
+      .sort((a, b) => ROLE_PRIORITY.indexOf(a.id) - ROLE_PRIORITY.indexOf(b.id));
+
+    if (roles.size === 0) return;
+    const topRole = roles.first();
+
+    const baseName =
+      member.user.globalName ||
+      member.displayName ||
+      member.nickname ||
+      member.user.username;
+
+    const cleanBase = baseName.replace(/^ん\[.*?\]\s*/g, "").trim();
+    const newNick = `ん[${topRole.name}] ${cleanBase}`;
+
+    if (member.nickname !== newNick) {
+      await member.setNickname(newNick);
+      console.log(`✅ ${member.user.tag} → ${newNick}`);
+    }
+  } catch (err) {
+    if (err.code === 50013)
+      console.warn(`⚠️ ${member.user.tag} 닉네임 변경 권한 부족`);
+  }
+}
 
 // === 🧠 Gemini + 채팅 개수 ===
 client.on("messageCreate", async (message) => {
@@ -127,8 +171,8 @@ client.on("messageCreate", async (message) => {
       if (msgs.size === 0) break;
       const filtered = msgs.filter(m => m.createdTimestamp >= start.getTime() && m.createdTimestamp <= end.getTime());
       count += filtered.size;
-      lastId = msgs.last().id;
-      if (msgs.last().createdTimestamp < start.getTime()) break;
+      lastId = msgs.last()?.id;
+      if (!lastId || msgs.last().createdTimestamp < start.getTime()) break;
     }
     await loading.edit(`💬 오늘 채팅이 오고 간 개수는 **${count.toLocaleString()}개** 입니다.`);
     return;
@@ -148,8 +192,8 @@ client.on("messageCreate", async (message) => {
       if (msgs.size === 0) break;
       const filtered = msgs.filter(m => m.createdTimestamp >= start.getTime() && m.createdTimestamp <= end.getTime());
       count += filtered.size;
-      lastId = msgs.last().id;
-      if (msgs.last().createdTimestamp < start.getTime()) break;
+      lastId = msgs.last()?.id;
+      if (!lastId || msgs.last().createdTimestamp < start.getTime()) break;
     }
     await loading.edit(`💬 어제 채팅이 오고 간 개수는 **${count.toLocaleString()}개** 입니다.`);
     return;
@@ -189,131 +233,40 @@ client.on("messageCreate", async (message) => {
   }
 });
 
-// === ✅ 초대 추적 시스템 ===
-const invitesCache = new Map();
-const inviteStats = new Map();
-
-client.once("ready", async () => {
-  console.log("📨 초대 추적 시스템 활성화됨");
-  for (const [guildId, guild] of client.guilds.cache) {
-    try {
-      const guildInvites = await guild.invites.fetch();
-      invitesCache.set(guildId, guildInvites);
-    } catch (err) {
-      console.warn(`⚠️ ${guild.name} 초대 정보를 가져올 수 없습니다: ${err.message}`);
-    }
-  }
-});
-
-client.on("inviteCreate", async (invite) => {
-  const guildInvites = await invite.guild.invites.fetch();
-  invitesCache.set(invite.guild.id, guildInvites);
-});
-client.on("inviteDelete", async (invite) => {
-  const guildInvites = await invite.guild.invites.fetch();
-  invitesCache.set(invite.guild.id, guildInvites);
-});
-
-// === 입장 추적 ===
+// === 👋 입장 로그 ===
 client.on("guildMemberAdd", async (member) => {
   if (member.guild.id !== MAIN_GUILD_ID) return;
-  const joinChannel = member.guild.channels.cache.get(JOIN_LOG_CHANNEL);
-  if (!joinChannel) return;
-
-  let inviter = "❓ 알 수 없음";
-  let inviteCode = "❓ 불명";
-
-  try {
-    const cachedInvites = invitesCache.get(member.guild.id);
-    const newInvites = await member.guild.invites.fetch();
-    const usedInvite = newInvites.find(
-      (inv) => cachedInvites?.get(inv.code)?.uses < inv.uses
-    );
-
-    if (usedInvite) {
-      inviter = usedInvite.inviter ? `${usedInvite.inviter.tag}` : "❓ 시스템 초대 또는 만료된 링크";
-      inviteCode = usedInvite.code;
-      const inviterId = usedInvite.inviter?.id;
-      if (inviterId) {
-        const stats = inviteStats.get(inviterId) || { joins: 0, leaves: 0 };
-        stats.joins += 1;
-        inviteStats.set(inviterId, stats);
-      }
-    }
-    invitesCache.set(member.guild.id, newInvites);
-  } catch (err) {
-    console.error("❌ 초대 추적 오류:", err.message);
-  }
+  const channel = member.guild.channels.cache.get(JOIN_LOG_CHANNEL);
+  if (!channel) return;
 
   const embed = new EmbedBuilder()
     .setTitle("멤버가 입장했습니다!")
     .setColor("#00bcd4")
     .setThumbnail(member.user.displayAvatarURL({ dynamic: true }))
     .addFields(
-      { name: "유저", value: `${member.user.tag}`, inline: true },
-      { name: "초대자", value: inviter, inline: true },
-      { name: "초대 링크", value: `https://discord.gg/${inviteCode}`, inline: false },
-      { name: "가입 시간", value: `<t:${Math.floor(Date.now() / 1000)}:F>` }
+      { name: "유저", value: `${member.user}`, inline: true },
+      { name: "입장 시간", value: `<t:${Math.floor(Date.now() / 1000)}:F>` }
     );
+  channel.send({ embeds: [embed] });
 
-  joinChannel.send({ embeds: [embed] });
+  await updateNickname(member);
 });
 
-// === 퇴장 추적 ===
+// === 🚪 퇴장 로그 ===
 client.on("guildMemberRemove", async (member) => {
   if (member.guild.id !== MAIN_GUILD_ID) return;
-  const leaveChannel = member.guild.channels.cache.get(LEAVE_LOG_CHANNEL);
-  if (!leaveChannel) return;
-
-  let inviter = "❓ 알 수 없음";
-  for (const [inviterId, stats] of inviteStats) {
-    if (stats.joins > stats.leaves) {
-      inviter = `<@${inviterId}>`;
-      stats.leaves += 1;
-      inviteStats.set(inviterId, stats);
-      break;
-    }
-  }
+  const channel = member.guild.channels.cache.get(LEAVE_LOG_CHANNEL);
+  if (!channel) return;
 
   const embed = new EmbedBuilder()
     .setTitle("멤버가 퇴장했습니다.")
     .setColor("#d91e18")
     .setThumbnail(member.user.displayAvatarURL({ dynamic: true }))
     .addFields(
-      { name: "유저", value: `${member.user.tag}`, inline: true },
-      { name: "추정 초대자", value: inviter, inline: true },
+      { name: "유저", value: `${member.user}`, inline: true },
       { name: "퇴장 시간", value: `<t:${Math.floor(Date.now() / 1000)}:F>` }
     );
-
-  leaveChannel.send({ embeds: [embed] });
-});
-
-// === !초대랭킹 명령어 ===
-client.on("messageCreate", async (message) => {
-  if (message.author.bot) return;
-  if (message.guild?.id !== MAIN_GUILD_ID) return;
-  if (message.content === "!초대랭킹") {
-    if (inviteStats.size === 0)
-      return message.reply("아직 초대 기록이 없습니다 😢");
-
-    const sorted = [...inviteStats.entries()].sort(
-      (a, b) => b[1].joins - a[1].joins
-    );
-    const top = sorted
-      .slice(0, 10)
-      .map(([id, stats], i) =>
-        `**${i + 1}.** <@${id}> — ✅ ${stats.joins}명 초대, 🚪 ${stats.leaves}명 퇴장`
-      )
-      .join("\n");
-
-    const embed = new EmbedBuilder()
-      .setTitle("🏆 초대 랭킹 TOP 10")
-      .setColor("#f1c40f")
-      .setDescription(top)
-      .setTimestamp();
-
-    message.reply({ embeds: [embed] });
-  }
+  channel.send({ embeds: [embed] });
 });
 
 client.login(process.env.DISCORD_TOKEN);
