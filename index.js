@@ -1,8 +1,15 @@
 import express from "express";
+import {
+  Client,
+  GatewayIntentBits,
+  EmbedBuilder,
+} from "discord.js";
+import dotenv from "dotenv";
+dotenv.config();
 
-// === ✅ Render keep-alive용 웹 서버 ===
+// === ✅ Render Keep-alive 서버 ===
 const app = express();
-const PORT = process.env.PORT || 10000; // Render 기본 포트
+const PORT = process.env.PORT || 10000;
 
 app.get("/", (req, res) => {
   res.send("✅ Discord bot is running!");
@@ -12,22 +19,15 @@ app.listen(PORT, () => {
   console.log(`🌐 Keep-alive server running on port ${PORT}`);
 });
 
-import {
-  Client,
-  GatewayIntentBits,
-  EmbedBuilder,
-} from "discord.js";
-import dotenv from "dotenv";
-dotenv.config();
-
 // === 환경 설정 ===
+const MAIN_GUILD_ID = "1412427204117401673"; // ✅ 메인 서버 ID
 const VERIFY_CHANNEL_ID = "1433902681511952465";
 const VERIFY_ROLE_ID = "1431223559690260520";
 const JOIN_LOG_CHANNEL = "1433902671005487275";
 const LEAVE_LOG_CHANNEL = "1433902689430802442";
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 
-// 역할 ID 우선순위 (닉네임 변경용)
+// === 역할 우선순위 ===
 const ROLE_PRIORITY = [
   "1431223211785195663",
   "1431223251572494453",
@@ -38,7 +38,7 @@ const ROLE_PRIORITY = [
   "1431223559690260520",
 ];
 
-// 클라이언트 설정 시 partials 추가
+// === Discord 클라이언트 ===
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -47,7 +47,7 @@ const client = new Client({
     GatewayIntentBits.MessageContent,
     GatewayIntentBits.GuildMessageReactions,
   ],
-  partials: ["MESSAGE", "CHANNEL", "REACTION"], // ✅ 이거 꼭 추가
+  partials: ["MESSAGE", "CHANNEL", "REACTION"],
 });
 
 const invites = new Map();
@@ -62,33 +62,60 @@ client.once("ready", async () => {
       const guildInvites = await guild.invites.fetch();
       invites.set(guildId, guildInvites);
     } catch {
-      console.warn(`⚠️ ${guild.name} 서버의 초대 정보를 불러올 수 없습니다.`);
+      console.warn(`⚠️ ${guild.name} 서버 초대 정보를 불러올 수 없습니다.`);
     }
   }
 
-  // 기본 상태 설정
-  const updateDefaultStatus = () => {
-    const totalMembers = client.guilds.cache.reduce(
-      (acc, guild) => acc + guild.memberCount,
-      0
-    );
+  // === 🛰️ 기본 상태 설정 ===
+const updateDefaultStatus = () => {
+  const totalMembers = client.guilds.cache.reduce(
+    (acc, guild) => acc + guild.memberCount,
+    0
+  );
 
-    client.user.setPresence({
-      activities: [
-        {
-          name: `🛰️ ${totalMembers}명 보호하는 중`,
-          type: 0, // 🎮 "하는 중"
-        },
-      ],
-      status: "online",
-    });
-  };
+  client.user.setPresence({
+    activities: [
+      {
+        name: `🛰️ ${totalMembers}명 보호하는 중`,
+        type: 0, // 🎮 "하는 중"
+      },
+    ],
+    status: "online",
+  });
+};
+
+// === 💝 특별 메시지 (빼빼로데이 안내) ===
+const updatePeperoStatus = () => {
+  client.user.setPresence({
+    activities: [
+      {
+        name: `💝 11월 11일은 빼빼로데이인거 알지?`,
+        type: 0,
+      },
+    ],
+    status: "online",
+  });
+};
+
+// === 🔁 30초마다 상태 교체 ===
+let showPepero = false;
+setInterval(() => {
+  showPepero = !showPepero;
+  if (showPepero) updatePeperoStatus();
+  else updateDefaultStatus();
+}, 30000);
+
+// === 초기 실행 ===
+client.once("ready", () => {
+  console.log(`✅ ${client.user.tag} 로그인 완료!`);
+  updateDefaultStatus();
+});
 
   updateDefaultStatus();
   setInterval(updateDefaultStatus, 1000 * 60 * 5);
 });
 
-// === 초대 코드 갱신 ===
+// === 초대 캐시 갱신 ===
 client.on("inviteCreate", async (invite) => {
   const guildInvites = await invite.guild.invites.fetch();
   invites.set(invite.guild.id, guildInvites);
@@ -98,305 +125,163 @@ client.on("inviteDelete", async (invite) => {
   invites.set(invite.guild.id, guildInvites);
 });
 
+// === 🧠 Gemini 대화 (모든 서버에서 작동) ===
 client.on("messageCreate", async (message) => {
   if (message.author.bot) return;
-  if (!message.mentions.has(client.user)) return; // 봇 멘션 없으면 무시
+  if (!message.mentions.has(client.user)) return;
 
-  // --- 멘션 이후의 텍스트 추출 ---
-  const content = message.content.replace(`<@${client.user.id}>`, "").trim();
+// --- 멘션 이후의 텍스트 추출 ---
+const content = message.content.replace(`<@${client.user.id}>`, "").trim();
 
-  // === 🧮 오늘 채팅 개수 ===
-  if (content.includes("오늘 채팅친 개수")) {
-    const now = new Date();
-    const start = new Date(now.setHours(0, 0, 0, 0));
-    const end = new Date(now.setHours(23, 59, 59, 999));
+// === 🧮 오늘 채팅 개수 ===
+if (content.includes("오늘 채팅친 개수")) {
+  const now = new Date();
+  const start = new Date(now.setHours(0, 0, 0, 0));
+  const end = new Date(now.setHours(23, 59, 59, 999));
 
-    let count = 0;
-    let lastId;
+  // 로딩 메시지 전송
+  const loadingMsg = await message.reply("<a:Loading:1433912890649215006> 오늘 채팅 기록을 조회중입니다...");
 
-    while (true) {
-      const options = { limit: 100 };
-      if (lastId) options.before = lastId;
-      const msgs = await message.channel.messages.fetch(options);
-      if (msgs.size === 0) break;
+  let count = 0;
+  let lastId;
 
-      const filtered = msgs.filter(
-        (msg) =>
-          msg.createdTimestamp >= start.getTime() &&
-          msg.createdTimestamp <= end.getTime()
-      );
+  while (true) {
+    const options = { limit: 100 };
+    if (lastId) options.before = lastId;
+    const msgs = await message.channel.messages.fetch(options);
+    if (msgs.size === 0) break;
 
-      count += filtered.size;
-      lastId = msgs.last().id;
-      if (msgs.last().createdTimestamp < start.getTime()) break;
-    }
+    const filtered = msgs.filter(
+      (msg) =>
+        msg.createdTimestamp >= start.getTime() &&
+        msg.createdTimestamp <= end.getTime()
+    );
 
-    await message.reply(`오늘 채팅이 오고 간 개수는 **${count.toLocaleString()}개** 입니다.`);
-    return; // ✅ 여기서 완전히 중단 (Gemini 안감)
+    count += filtered.size;
+    lastId = msgs.last().id;
+    if (msgs.last().createdTimestamp < start.getTime()) break;
   }
 
-  // === 🧮 어제 채팅 개수 ===
-  if (content.includes("어제 채팅친 개수")) {
-    const now = new Date();
-    const yesterdayStart = new Date(now.setDate(now.getDate() - 1));
-    yesterdayStart.setHours(0, 0, 0, 0);
-    const yesterdayEnd = new Date(yesterdayStart);
-    yesterdayEnd.setHours(23, 59, 59, 999);
+  // ✅ 결과 표시 (기존 메시지 수정)
+  await loadingMsg.edit(`💬 오늘 채팅이 오고 간 개수는 **${count.toLocaleString()}개** 입니다.`);
+  return;
+}
 
-    let count = 0;
-    let lastId;
+// === 🧮 어제 채팅 개수 ===
+if (content.includes("어제 채팅친 개수")) {
+  const now = new Date();
+  const yesterdayStart = new Date(now.setDate(now.getDate() - 1));
+  yesterdayStart.setHours(0, 0, 0, 0);
+  const yesterdayEnd = new Date(yesterdayStart);
+  yesterdayEnd.setHours(23, 59, 59, 999);
 
-    while (true) {
-      const options = { limit: 100 };
-      if (lastId) options.before = lastId;
-      const msgs = await message.channel.messages.fetch(options);
-      if (msgs.size === 0) break;
+  const loadingMsg = await message.reply("<a:Loading:1433912890649215006> 어제 채팅 기록을 조회중입니다...");
 
-      const filtered = msgs.filter(
-        (msg) =>
-          msg.createdTimestamp >= yesterdayStart.getTime() &&
-          msg.createdTimestamp <= yesterdayEnd.getTime()
-      );
+  let count = 0;
+  let lastId;
 
-      count += filtered.size;
-      lastId = msgs.last().id;
-      if (msgs.last().createdTimestamp < yesterdayStart.getTime()) break;
-    }
+  while (true) {
+    const options = { limit: 100 };
+    if (lastId) options.before = lastId;
+    const msgs = await message.channel.messages.fetch(options);
+    if (msgs.size === 0) break;
 
-    await message.reply(`어제 채팅이 오고 간 개수는 **${count.toLocaleString()}개** 입니다.`);
-    return; // ✅ 여기서 완전히 중단 (Gemini 안감)
+    const filtered = msgs.filter(
+      (msg) =>
+        msg.createdTimestamp >= yesterdayStart.getTime() &&
+        msg.createdTimestamp <= yesterdayEnd.getTime()
+    );
+
+    count += filtered.size;
+    lastId = msgs.last().id;
+    if (msgs.last().createdTimestamp < yesterdayStart.getTime()) break;
   }
 
-  // === 💬 나머지는 Gemini 처리 ===
-  if (!content) {
-    await message.reply("내용이랑 같이 해줄 수 있어? :D");
-    return;
-  }
+  await loadingMsg.edit(`💬 어제 채팅이 오고 간 개수는 **${count.toLocaleString()}개** 입니다.`);
+  return;
+}
 
-  // ✅ 이 아래는 오직 Gemini만 작동
-  const waitMsg = await message.reply("<a:Loading:1433912890649215006> 좋은 답변 생성 중...");
+  // ✅ Gemini
+  if (!content) return message.reply("내용이랑 같이 해줄 수 있어? :D");
+
+  const thinkingMsg = await message.reply("<a:Loading:1433912890649215006> 좋은 답변을 생각 중이에요...");
 
   try {
     const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1/models/gemini-2.0-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
+      `https://generativelanguage.googleapis.com/v1/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          contents: [
-            {
-              parts: [
-                {
-                  text: `
-너는 내 친구야.
-따뜻하고 자연스러운 한국어로, 친구처럼 말하듯 대화해줘.
-너무 딱딱하지 않게 감정 표현이나 유머도 괜찮아.
-내가 묻고 싶은 건 이거야: ${content}
-                  `.trim(),
-                },
-              ],
-            },
-          ],
+          contents: [{ parts: [{ text: `너는 내 친구야. 따뜻하고 자연스러운 한국어로, 친구처럼 말하듯 대화해줘. 내가 묻고 싶은 건 이거야: ${content}` }] }],
         }),
       }
     );
-
     const data = await res.json();
-
-    if (!res.ok) {
-      console.error("❌ Gemini API 오류:", data);
-      return waitMsg.edit(
-        `<:Warning:1429715991591387146> API 오류: ${data.error?.message || "알 수 없는 오류입니다."}`
-      );
-    }
+    if (!res.ok) throw new Error(data.error?.message || "API 오류");
 
     const answer =
       data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ||
-      "<:Warning:1429715991591387146> 답변을 생성할 수 없어요.";
+      "⚠️ 답변을 생성할 수 없어요.";
 
     const embed = new EmbedBuilder()
-      .setAuthor({
-        name: message.author.username,
-        iconURL: message.author.displayAvatarURL(),
-      })
+      .setAuthor({ name: message.author.username, iconURL: message.author.displayAvatarURL() })
       .setTitle("일런봇의 답변")
       .setDescription(answer)
       .setColor("#3e22a3")
       .setTimestamp();
 
-    await waitMsg.edit({ content: "", embeds: [embed] });
+    await thinkingMsg.edit({ content: "", embeds: [embed] });
   } catch (err) {
-    console.error("❌ 요청 오류:", err);
-    await waitMsg.edit("⚠️ 오류가 발생했습니다.");
+    console.error("❌ Gemini 오류:", err);
+    thinkingMsg.edit("⚠️ 오류가 발생했습니다.");
   }
 });
 
-// === 2️⃣ !인증설정 ===
+// === 🧩 인증/로그/역할/닉네임 관리 (메인 서버만 작동) ===
+
+// 인증 설정
 client.on("messageCreate", async (message) => {
   if (message.author.bot) return;
+  if (message.guild?.id !== MAIN_GUILD_ID) return;
   if (message.content === "!인증설정") {
-    if (!message.member.permissions.has("Administrator")) {
-      return message.reply("⛔ 관리자만 사용할 수 있습니다.");
-    }
-
-    try {
-      const embed = new EmbedBuilder()
-        .setTitle("아래 이모티콘을 누르고 인증하세요.")
-        .setDescription("이모티콘을 누르면 **사원** 역할이 지급됩니다.")
-        .setColor("#3a872e");
-
-      const verifyChannel = message.guild.channels.cache.get(VERIFY_CHANNEL_ID);
-      if (!verifyChannel) return message.reply("⚠️ 인증 채널을 찾을 수 없습니다.");
-
-      const sentMessage = await verifyChannel.send({ embeds: [embed] });
-      await sentMessage.react("✅");
-
-      message.reply("✅ 인증 메시지를 전송하고 체크 이모지를 추가했어요!");
-    } catch (err) {
-      console.error(err);
-      message.reply("⚠️ 인증 메시지를 보내는 중 오류가 발생했어요.");
-    }
+    if (!message.member.permissions.has("Administrator")) return message.reply("⛔ 관리자만 사용 가능");
+    const embed = new EmbedBuilder()
+      .setTitle("아래 이모티콘을 누르고 인증하세요.")
+      .setDescription("이모티콘을 누르면 **사원** 역할이 지급됩니다.")
+      .setColor("#3a872e");
+    const verifyChannel = message.guild.channels.cache.get(VERIFY_CHANNEL_ID);
+    if (!verifyChannel) return message.reply("⚠️ 인증 채널을 찾을 수 없습니다.");
+    const sent = await verifyChannel.send({ embeds: [embed] });
+    await sent.react("✅");
+    message.reply("✅ 인증 메시지 전송 완료!");
   }
 });
 
-// === ✅ 인증 반응 시 역할 지급 ===
+// 반응 시 역할 지급
 client.on("messageReactionAdd", async (reaction, user) => {
   if (user.bot) return;
-
-  // ✅ partial(부분 로드)인 경우 fetch해서 완전한 객체로 만듦
-  if (reaction.partial) {
-    try {
-      await reaction.fetch();
-    } catch (err) {
-      console.error("❌ 반응 데이터를 불러올 수 없습니다:", err);
-      return;
-    }
-  }
-
-  const messageId = reaction.message.id;
-  const channelId = reaction.message.channelId;
-
-  // ✅ 인증 조건
-  const isVerifyReaction =
-    (channelId === VERIFY_CHANNEL_ID && reaction.emoji.name === "✅") ||
-    (messageId === "1434239630248513546" && reaction.emoji.name === "✅");
-
-  if (!isVerifyReaction) return;
-
-  try {
-    const guild = reaction.message.guild;
-    const member = await guild.members.fetch(user.id);
-    const role = guild.roles.cache.get(VERIFY_ROLE_ID);
-
-    if (!role) return console.warn("⚠️ 역할을 찾을 수 없습니다.");
-
-    await member.roles.add(role);
-    console.log(`✅ ${member.user.username} 님에게 ${role.name} 역할 지급 완료!`);
-  } catch (err) {
-    console.error("❌ 역할 지급 중 오류:", err);
-  }
+  const guild = reaction.message.guild;
+  if (!guild || guild.id !== MAIN_GUILD_ID) return;
+  if (reaction.emoji.name !== "✅") return;
+  const role = guild.roles.cache.get(VERIFY_ROLE_ID);
+  if (!role) return;
+  const member = await guild.members.fetch(user.id);
+  if (!member.roles.cache.has(role.id)) await member.roles.add(role);
 });
 
-// === ✅ 반응 개수 추적 기반 역할 지급 ===
-const TARGET_MESSAGE_ID = "1434239630248513546";
-const TARGET_EMOJI = "✅";
-let lastReactionCount = 0;
-
-async function checkReactions() {
-  try {
-    // 메시지 가져오기
-    const guild = client.guilds.cache.first(); // 봇이 한 서버에만 있을 경우
-    const verifyChannel = guild.channels.cache.get(VERIFY_CHANNEL_ID);
-    if (!verifyChannel) return console.warn("⚠️ 인증 채널을 찾을 수 없습니다.");
-
-    const msg = await verifyChannel.messages.fetch(TARGET_MESSAGE_ID);
-    const reaction = msg.reactions.cache.get(TARGET_EMOJI);
-
-    if (!reaction) return;
-
-    // 반응 개수 비교
-    const currentCount = reaction.count;
-
-    if (currentCount !== lastReactionCount) {
-      console.log(
-        `✅ 반응 개수 변화 감지: ${lastReactionCount} → ${currentCount}`
-      );
-      lastReactionCount = currentCount;
-
-      // ✅ 새로 반응한 유저들 목록 가져오기
-      const users = await reaction.users.fetch();
-      for (const [, user] of users) {
-        if (user.bot) continue;
-
-        try {
-          const member = await guild.members.fetch(user.id);
-          const role = guild.roles.cache.get(VERIFY_ROLE_ID);
-          if (!role) continue;
-
-          if (!member.roles.cache.has(role.id)) {
-            await member.roles.add(role);
-            console.log(`🎉 ${member.user.username} 님에게 역할 지급 완료`);
-          }
-        } catch (err) {
-          console.warn(`⚠️ ${user.username} 처리 실패: ${err.message}`);
-        }
-      }
-    }
-  } catch (err) {
-    console.error("❌ 반응 감지 중 오류:", err.message);
-  }
-}
-
-// ✅ 10초마다 반응 상태 체크
-setInterval(checkReactions, 10000);
-
-// === ✅ 디스플레이 이름 자동 스캔 루프 ===
-async function syncDisplayNames() {
-  try {
-    for (const [, guild] of client.guilds.cache) {
-      const members = await guild.members.fetch();
-
-      for (const [, member] of members) {
-        // 🧩 닉네임과 표시 이름이 다르면 갱신
-        const displayBase =
-          member.user.globalName ||
-          member.displayName ||
-          member.nickname ||
-          member.user.username;
-
-        // 닉네임이 표시이름 기반 규칙과 다르면 업데이트
-        const hasPrefix = /^ん\[.*?\]/.test(member.displayName);
-        if (member.displayName !== displayBase || hasPrefix) {
-          await updateNickname(member);
-          await new Promise((r) => setTimeout(r, 500)); // API 제한 방지
-        }
-      }
-    }
-    console.log("✅ DisplayName 자동 동기화 완료");
-  } catch (err) {
-    console.error("❌ DisplayName 동기화 오류:", err);
-  }
-}
-
-// === 1분마다 전체 스캔 실행 ===
-setInterval(syncDisplayNames, 60 * 1000);
-
-// === 3️⃣ 입장 로그 ===
+// 입장 로그
 client.on("guildMemberAdd", async (member) => {
+  if (member.guild.id !== MAIN_GUILD_ID) return;
   const joinChannel = member.guild.channels.cache.get(JOIN_LOG_CHANNEL);
   if (!joinChannel) return;
 
-  const joinedAt = new Date();
-  const createdAt = member.user.createdAt;
   let inviter = "알 수 없음";
-
   try {
     const cachedInvites = invites.get(member.guild.id);
     const newInvites = await member.guild.invites.fetch();
-    const usedInvite = newInvites.find(
-      (inv) => cachedInvites?.get(inv.code)?.uses < inv.uses
-    );
-    if (usedInvite) inviter = `${usedInvite.inviter} (${usedInvite.inviter.username})`;
+    const usedInvite = newInvites.find((inv) => cachedInvites?.get(inv.code)?.uses < inv.uses);
+    if (usedInvite?.inviter) inviter = `${usedInvite.inviter} (${usedInvite.inviter.username})`;
     invites.set(member.guild.id, newInvites);
   } catch {
     inviter = "초대자 정보를 불러올 수 없음";
@@ -408,21 +293,17 @@ client.on("guildMemberAdd", async (member) => {
     .setThumbnail(member.user.displayAvatarURL({ dynamic: true }))
     .addFields(
       { name: "**유저**", value: `${member.user} (${member.user.username})` },
-      { name: "**서버 입장 시간**", value: `<t:${Math.floor(joinedAt.getTime() / 1000)}:F>` },
-      { name: "**계정 생성일**", value: `<t:${Math.floor(createdAt.getTime() / 1000)}:F>` },
+      { name: "**서버 입장 시간**", value: `<t:${Math.floor(Date.now() / 1000)}:F>` },
       { name: "**초대자**", value: inviter }
     );
-
   joinChannel.send({ embeds: [embed] });
 });
 
-// === 4️⃣ 퇴장 로그 ===
+// 퇴장 로그
 client.on("guildMemberRemove", async (member) => {
+  if (member.guild.id !== MAIN_GUILD_ID) return;
   const leaveChannel = member.guild.channels.cache.get(LEAVE_LOG_CHANNEL);
   if (!leaveChannel) return;
-
-  const leftAt = new Date();
-  const createdAt = member.user.createdAt;
 
   const embed = new EmbedBuilder()
     .setTitle("멤버가 퇴장했습니다.")
@@ -430,173 +311,9 @@ client.on("guildMemberRemove", async (member) => {
     .setThumbnail(member.user.displayAvatarURL({ dynamic: true }))
     .addFields(
       { name: "**유저**", value: `${member.user} (${member.user.username})` },
-      { name: "**서버 퇴장 시간**", value: `<t:${Math.floor(leftAt.getTime() / 1000)}:F>` },
-      { name: "**계정 생성일**", value: `<t:${Math.floor(createdAt.getTime() / 1000)}:F>` }
+      { name: "**서버 퇴장 시간**", value: `<t:${Math.floor(Date.now() / 1000)}:F>` }
     );
-
   leaveChannel.send({ embeds: [embed] });
 });
 
-// === ✅ 역할 기반 닉네임 접두사 추가 ===
-async function updateNickname(member) {
-  try {
-    // 지정된 역할 중 우선순위 높은 역할 찾기
-    const roles = member.roles.cache
-      .filter((role) => ROLE_PRIORITY.includes(role.id))
-      .sort(
-        (a, b) => ROLE_PRIORITY.indexOf(a.id) - ROLE_PRIORITY.indexOf(b.id)
-      );
-
-    if (roles.size === 0) return;
-
-    const topRole = roles.first();
-
-    // ✅ 현재 닉네임 → 없으면 표시 이름(displayName) → username
-const baseName =
-  member.nickname || 
-  member.user.globalName ||  // ✅ 전역 표시 이름 (오프라인 유저 포함)
-  member.displayName || 
-  member.user.username;
-
-
-    // ✅ 기존 접두사 제거
-    const cleanBase = baseName.replace(/^ん\[.*?\]\s*/g, "").trim();
-
-    // ✅ 새 닉네임: 접두사만 추가
-    const newNickname = `ん[${topRole.name}] ${cleanBase}`;
-
-    if (member.nickname === newNickname) return;
-
-    await member.setNickname(newNickname);
-    console.log(`✅ ${member.user.username} → ${newNickname}`);
-  } catch (err) {
-    if (err.code === 50013) {
-      console.warn(
-        `⚠️ ${member.user.username} 닉네임 변경 불가 (권한 부족 / 역할 순위 낮음)`
-      );
-    } else {
-      console.error(`❌ ${member.user.username} 닉네임 변경 실패:`, err.message);
-    }
-  }
-}
-
-// === ✅ !닉네임업데이트 명령어 ===
-client.on("messageCreate", async (message) => {
-  if (message.author.bot) return;
-  if (message.content !== "!닉네임업데이트") return;
-
-  if (!message.member.permissions.has("Administrator")) {
-    return message.reply("⛔ 관리자만 사용할 수 있습니다.");
-  }
-
-  await message.reply("🔄 모든 멤버의 닉네임을 갱신 중입니다...");
-
-  const members = await message.guild.members.fetch();
-  let success = 0,
-    failed = 0;
-
-  for (const [, member] of members) {
-    try {
-      await updateNickname(member);
-      success++;
-      await new Promise((r) => setTimeout(r, 800)); // API 속도 제한 방지
-    } catch {
-      failed++;
-    }
-  }
-
-  message.reply(`✅ 닉네임 업데이트 완료!\n성공: ${success}명 / 실패: ${failed}명`);
-});
-
-// === ✅ !닉네임초기화 명령어 ===
-client.on("messageCreate", async (message) => {
-  if (message.author.bot) return;
-  if (message.content !== "!닉네임초기화") return;
-
-  if (!message.member.permissions.has("Administrator")) {
-    return message.reply("⛔ 관리자만 사용할 수 있습니다.");
-  }
-
-  await message.reply("🧹 모든 멤버의 닉네임을 디스플레이 닉네임 기준으로 초기화 중입니다...");
-
-  const members = await message.guild.members.fetch();
-  let reset = 0,
-      failed = 0;
-
-  for (const [, member] of members) {
-    try {
-      // ✅ 디스플레이 이름 선택 (offline 대응 포함)
-      const displayBase =
-        member.user.globalName || // 전역 표시 이름 (offline 지원)
-        member.displayName ||     // 온라인 시 표시 이름
-        member.nickname ||        // 별명 fallback
-        member.user.username;     // 최종 fallback
-
-      // ✅ 접두사 제거 후 표시 이름으로 덮어쓰기
-      const cleanBase = displayBase.replace(/^ん\[.*?\]\s*/g, "").trim();
-
-      await member.setNickname(cleanBase);
-      reset++;
-
-      await new Promise((r) => setTimeout(r, 800)); // 속도 제한 방지
-    } catch (err) {
-      failed++;
-      console.warn(`⚠️ ${member.user.username} 초기화 실패: ${err.message}`);
-    }
-  }
-
-  message.reply(`✅ 디스플레이 닉네임 기준 초기화 완료!\n초기화됨: ${reset}명 / 실패: ${failed}명`);
-});
-
-// === ✅ 역할 변경 시 자동 갱신 ===
-client.on("guildMemberUpdate", async (oldMember, newMember) => {
-  const oldRoles = oldMember.roles.cache.map((r) => r.id);
-  const newRoles = newMember.roles.cache.map((r) => r.id);
-
-  const changed =
-    oldRoles.length !== newRoles.length ||
-    !oldRoles.every((r) => newRoles.includes(r));
-
-  if (changed) await updateNickname(newMember);
-});
-
-// === ✅ 서버 입장 시 자동 갱신 ===
-client.on("guildMemberAdd", async (member) => await updateNickname(member));
-
-// === 6️⃣ 관리자 DM으로 상태 변경 ===
-client.on("messageCreate", async (message) => {
-  if (message.channel.type !== 1) return;
-  if (message.author.bot) return;
-  if (message.author.id !== "1410269476011770059") return;
-
-  if (message.content.startsWith("!set")) {
-    const args = message.content.slice(4).trim().split(/\s+/);
-    const emoji = args[0].match(/[\p{Emoji}\u200d]+/gu)
-      ? args[0]
-      : "🛰️";
-    const text = args.slice(emoji === "🛰️" ? 0 : 1).join(" ").trim();
-
-    if (!text)
-      return message.reply("⚠️ 사용법: `!set [이모지] [내용]`\n예: `!set 🎃 해피 할로윈 마감중`");
-
-    try {
-      await client.user.setPresence({
-        activities: [{ name: `${emoji} ${text}`, type: 0 }],
-        status: "online",
-      });
-      message.reply(`✅ 상태가 업데이트되었습니다!\n현재 상태: \`${emoji} ${text}\``);
-    } catch (err) {
-      console.error("❌ 상태 업데이트 오류:", err);
-      message.reply("⚠️ 상태를 업데이트하는 중 오류가 발생했습니다.");
-    }
-  }
-});
-
-// === 실행 ===
 client.login(process.env.DISCORD_TOKEN);
-
-
-
-
-
-
