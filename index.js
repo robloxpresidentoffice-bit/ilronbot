@@ -152,6 +152,49 @@ async function updateNickname(member) {
   }
 }
 
+// === ✅ 역할 추가/제거 시 닉네임 자동 업데이트 (감사로그 기반) ===
+client.on("guildAuditLogEntryCreate", async (entry, guild) => {
+  try {
+    if (guild.id !== MAIN_GUILD_ID) return; // 메인 서버만
+
+    // 역할 추가 또는 제거만 감지
+    if (entry.action !== 25 && entry.action !== 26) return; 
+    // 25 = ROLE_UPDATE_MEMBER, 26 = ROLE_REMOVE_MEMBER
+
+    const target = entry.target; // 유저 객체
+    if (!target || !target.id) return;
+
+    const member = await guild.members.fetch(target.id).catch(() => null);
+    if (!member) return;
+
+    // 역할 변경 감지 시 닉네임 업데이트
+    await updateNickname(member);
+    console.log(`🔁 ${member.user.tag} 역할 변경 감지 → 닉네임 재설정 완료`);
+  } catch (err) {
+    console.error("❌ 역할 감사로그 감시 중 오류:", err);
+  }
+});
+
+// === ✅ 기존 이벤트와 함께 작동 ===
+client.on("guildMemberUpdate", async (oldMember, newMember) => {
+  try {
+    if (newMember.guild.id !== MAIN_GUILD_ID) return;
+    const oldRoles = oldMember.roles.cache.map(r => r.id);
+    const newRoles = newMember.roles.cache.map(r => r.id);
+
+    const changed =
+      oldRoles.length !== newRoles.length ||
+      !oldRoles.every((r) => newRoles.includes(r));
+
+    if (changed) {
+      await updateNickname(newMember);
+      console.log(`🔁 ${newMember.user.tag} 역할 업데이트 감지 → 닉네임 변경`);
+    }
+  } catch (err) {
+    console.error("❌ guildMemberUpdate 처리 오류:", err);
+  }
+});
+
 // === 🧠 Gemini + 채팅 개수 ===
 client.on("messageCreate", async (message) => {
   if (message.author.bot) return;
@@ -270,3 +313,4 @@ client.on("guildMemberRemove", async (member) => {
 });
 
 client.login(process.env.DISCORD_TOKEN);
+
