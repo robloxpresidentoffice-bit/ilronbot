@@ -140,7 +140,7 @@ async function updateNickname(member) {
       member.user.username;
 
     const cleanBase = baseName.replace(/^𝕾𝕻𝕿\[.*?\]\s*/g, "").trim();
-    const newNick = `ん[${topRole.name}] ${cleanBase}`;
+    const newNick = `𝕾𝕻𝕿[${topRole.name}] ${cleanBase}`;
 
     if (member.nickname !== newNick) {
       await member.setNickname(newNick);
@@ -155,19 +155,16 @@ async function updateNickname(member) {
 // === ✅ 역할 추가/제거 시 닉네임 자동 업데이트 (감사로그 기반) ===
 client.on("guildAuditLogEntryCreate", async (entry, guild) => {
   try {
-    if (guild.id !== MAIN_GUILD_ID) return; // 메인 서버만
+    if (guild.id !== MAIN_GUILD_ID) return;
 
-    // 역할 추가 또는 제거만 감지
-    if (entry.action !== 25 && entry.action !== 26) return; 
-    // 25 = ROLE_UPDATE_MEMBER, 26 = ROLE_REMOVE_MEMBER
+    if (entry.action !== 25 && entry.action !== 26) return;
 
-    const target = entry.target; // 유저 객체
+    const target = entry.target;
     if (!target || !target.id) return;
 
     const member = await guild.members.fetch(target.id).catch(() => null);
     if (!member) return;
 
-    // 역할 변경 감지 시 닉네임 업데이트
     await updateNickname(member);
     console.log(`🔁 ${member.user.tag} 역할 변경 감지 → 닉네임 재설정 완료`);
   } catch (err) {
@@ -175,7 +172,7 @@ client.on("guildAuditLogEntryCreate", async (entry, guild) => {
   }
 });
 
-// === ✅ 기존 이벤트와 함께 작동 ===
+// === 기존 역할 업데이트 이벤트 ===
 client.on("guildMemberUpdate", async (oldMember, newMember) => {
   try {
     if (newMember.guild.id !== MAIN_GUILD_ID) return;
@@ -200,12 +197,10 @@ client.on("messageCreate", async (message) => {
   if (message.author.bot) return;
   if (!message.mentions.has(client.user)) return;
 
-  // === ❌ @everyone / @here 멘션 시 완전 무시 ===
   if (message.mentions.everyone) return;
 
   const content = message.content.replace(`<@${client.user.id}>`, "").trim();
 
-  // === 📊 오늘 채팅 개수 ===
   if (content.includes("오늘 채팅친 개수")) {
     const loading = await message.reply("<a:Loading:1433912890649215006> 오늘 채팅 기록을 조회중입니다...");
     const now = new Date();
@@ -226,7 +221,6 @@ client.on("messageCreate", async (message) => {
     return;
   }
 
-  // === 📊 어제 채팅 개수 ===
   if (content.includes("어제 채팅친 개수")) {
     const loading = await message.reply("<a:Loading:1433912890649215006> 어제 채팅 기록을 조회중입니다...");
     const now = new Date();
@@ -249,7 +243,6 @@ client.on("messageCreate", async (message) => {
     return;
   }
 
-  // === 💬 Gemini 응답 ===
   if (!content) return await message.reply("내용이랑 같이 해줄 수 있어? :D");
 
   const waitMsg = await message.reply("<a:Loading:1433912890649215006> 좋은 답변 생성 중...");
@@ -304,8 +297,23 @@ client.on("guildMemberRemove", async (member) => {
   channel.send({ embeds: [embed] });
 });
 
+// === 🛠️ "!업데이트" 수동 역할 스캔 ===
+client.on("messageCreate", async (message) => {
+  if (message.author.bot) return;
+
+  if (message.content.trim() === "!업데이트") {
+    const member = message.member;
+
+    await message.reply("역할과 닉네임을 다시 확인하는 중...");
+
+    try {
+      await updateNickname(member);
+      await message.channel.send(`✅ **${member.user.username}** 님의 역할 기반 닉네임을 최신 상태로 업데이트했어요!`);
+    } catch (err) {
+      console.error("업데이트 명령 오류:", err);
+      await message.channel.send("⚠️ 업데이트 중 문제가 발생했습니다. (권한 문제일 수 있어요)");
+    }
+  }
+});
+
 client.login(process.env.DISCORD_TOKEN);
-
-
-
-
