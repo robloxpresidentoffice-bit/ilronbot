@@ -200,6 +200,9 @@ client.on("messageCreate", async (message) => {
   if (message.author.bot) return;
   if (!message.mentions.has(client.user)) return;
 
+  // === ❌ @everyone / @here 멘션 시 완전 무시 ===
+  if (message.mentions.everyone) return;
+
   const content = message.content.replace(`<@${client.user.id}>`, "").trim();
 
   // === 📊 오늘 채팅 개수 ===
@@ -209,6 +212,7 @@ client.on("messageCreate", async (message) => {
     const start = new Date(now.setHours(0, 0, 0, 0));
     const end = new Date(now.setHours(23, 59, 59, 999));
     let count = 0, lastId;
+
     while (true) {
       const msgs = await message.channel.messages.fetch({ limit: 100, before: lastId });
       if (msgs.size === 0) break;
@@ -217,6 +221,7 @@ client.on("messageCreate", async (message) => {
       lastId = msgs.last()?.id;
       if (!lastId || msgs.last().createdTimestamp < start.getTime()) break;
     }
+
     await loading.edit(`💬 오늘 채팅이 오고 간 개수는 **${count.toLocaleString()}개** 입니다.`);
     return;
   }
@@ -230,6 +235,7 @@ client.on("messageCreate", async (message) => {
     const end = new Date(start);
     end.setHours(23, 59, 59, 999);
     let count = 0, lastId;
+
     while (true) {
       const msgs = await message.channel.messages.fetch({ limit: 100, before: lastId });
       if (msgs.size === 0) break;
@@ -238,29 +244,8 @@ client.on("messageCreate", async (message) => {
       lastId = msgs.last()?.id;
       if (!lastId || msgs.last().createdTimestamp < start.getTime()) break;
     }
+
     await loading.edit(`💬 어제 채팅이 오고 간 개수는 **${count.toLocaleString()}개** 입니다.`);
-    return;
-  }
-
-  // === 💬 Gemini 응답 ===
-  client.on("messageCreate", async (message) => {
-  if (message.author.bot) return;
-  if (!message.mentions.has(client.user)) return;
-
-  // === ❌ @everyone / @here 멘션 시 완전 무시 ===
-  if (message.mentions.everyone) return;
-
-  const content = message.content.replace(`<@${client.user.id}>`, "").trim();
-
-  // === 📊 오늘 채팅 개수 ===
-  if (content.includes("오늘 채팅친 개수")) {
-    ...
-    return;
-  }
-
-  // === 📊 어제 채팅 개수 ===
-  if (content.includes("어제 채팅친 개수")) {
-    ...
     return;
   }
 
@@ -320,5 +305,6 @@ client.on("guildMemberRemove", async (member) => {
 });
 
 client.login(process.env.DISCORD_TOKEN);
+
 
 
