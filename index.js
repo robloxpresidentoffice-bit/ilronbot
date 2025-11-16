@@ -139,7 +139,7 @@ async function updateNickname(member) {
       member.nickname ||
       member.user.username;
 
-    const cleanBase = baseName.replace(/^ん\[.*?\]\s*/g, "").trim();
+    const cleanBase = baseName.replace(/^𝕾𝕻𝕿\[.*?\]\s*/g, "").trim();
     const newNick = `ん[${topRole.name}] ${cleanBase}`;
 
     if (member.nickname !== newNick) {
@@ -305,6 +305,7 @@ client.on("guildMemberRemove", async (member) => {
 });
 
 client.login(process.env.DISCORD_TOKEN);
+
 
 
 
