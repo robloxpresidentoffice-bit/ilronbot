@@ -114,7 +114,7 @@ client.once("ready", async () => {
     }
   }
 
-  setInterval(checkVerifyReactions, 1000);
+  setInterval(checkVerifyReactions, 3000);
 });
 
 // === 닉네임 자동 업데이트 함수 ===
@@ -281,4 +281,5 @@ client.on("guildMemberRemove", async (member) => {
 });
 
 client.login(process.env.DISCORD_TOKEN);
+
 
