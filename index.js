@@ -42,18 +42,22 @@ const client = new Client({
 
 // === 상태 메시지 ===
 function updateDefaultStatus() {
-  const total = client.guilds.cache.reduce((a, g) => a + g.memberCount, 0);
-  client.user.setPresence({
-    activities: [{ name: `🛰️ ${total}명 보호 중`, type: 0 }],
-    status: "online",
-  });
+  const total = client.guilds.cache.reduce((a, g) => a + (g.memberCount || 0), 0);
+  if (client.user) {
+    client.user.setPresence({
+      activities: [{ name: `🛰️ ${total}명 보호 중`, type: 0 }],
+      status: "online",
+    });
+  }
 }
 
 function updatePeperoStatus() {
-  client.user.setPresence({
-    activities: [{ name: `💝 11월 11일은 빼빼로데이`, type: 0 }],
-    status: "online",
-  });
+  if (client.user) {
+    client.user.setPresence({
+      activities: [{ name: `💝 11월 11일은 빼빼로데이`, type: 0 }],
+      status: "online",
+    });
+  }
 }
 
 // === 봇 준비 ===
@@ -71,6 +75,7 @@ client.once("ready", async () => {
 
   // === 인증 반응 감시 ===
   let previousReactors = new Set();
+  let firstCheck = true; // 시작 시 기존 반응자들에게 역할을 중복 지급하지 않도록 방지
 
   async function checkVerifyReactions() {
     try {
@@ -80,7 +85,7 @@ client.once("ready", async () => {
       const channel = guild.channels.cache.get(VERIFY_CHANNEL_ID);
       if (!channel) return;
 
-      const message = await channel.messages.fetch(VERIFY_MESSAGE_ID);
+      const message = await channel.messages.fetch(VERIFY_MESSAGE_ID).catch(() => null);
       if (!message) return;
 
       const reaction = message.reactions.cache.get("✅");
@@ -89,21 +94,41 @@ client.once("ready", async () => {
       const users = await reaction.users.fetch();
       const currentSet = new Set(users.filter(u => !u.bot).map(u => u.id));
 
+      if (firstCheck) {
+        // 첫 체크에선 기존 반응자들을 기준으로만 초기화하고 처리하지 않음
+        previousReactors = currentSet;
+        firstCheck = false;
+        return;
+      }
+
       const newlyReacted = [...currentSet].filter(id => !previousReactors.has(id));
 
       for (const userId of newlyReacted) {
         try {
-          const member = await guild.members.fetch(userId);
+          // 먼저 멤버가 캐시에 있는지 확인, 없으면 fetch하되 실패하면 조용히 건너뜀
+          let member = guild.members.cache.get(userId) || null;
+          if (!member) {
+            member = await guild.members.fetch(userId).catch(() => null);
+          }
+          if (!member) {
+            // 서버에 더 이상 없는 사용자이거나 가져올 수 없음 — 경고는 남기되 연속 로그를 방지하기 위해 간단히 처리
+            console.warn(`⚠️ ${userId} 처리 실패: 멤버를 찾을 수 없음 (서버에 없음 또는 권한 부족)`);
+            continue;
+          }
+
           const role = guild.roles.cache.get(VERIFY_ROLE_ID);
           if (!role) continue;
 
           if (!member.roles.cache.has(role.id)) {
-            await member.roles.add(role);
+            await member.roles.add(role).catch(err => {
+              console.warn(`역할 추가 실패: ${member.user.tag} — ${err.message}`);
+            });
             console.log(`역할 지급: ${member.user.tag}`);
 
-            await updateNickname(member);
+            await updateNickname(member).catch(() => {});
           }
         } catch (err) {
+          // 예외가 발생해도 루프를 멈추지 않도록 안전하게 처리
           console.warn(`⚠️ ${userId} 처리 실패: ${err.message}`);
         }
       }
@@ -114,6 +139,8 @@ client.once("ready", async () => {
     }
   }
 
+  // 처음엔 한 번만 체크(초기화)하고, 이후에 주기적으로 체크
+  checkVerifyReactions();
   setInterval(checkVerifyReactions, 3000);
 });
 
@@ -138,13 +165,15 @@ async function updateNickname(member) {
     const newNick = `𝕾𝕻𝕿[${topRole.name}] ${clean}`;
 
     if (member.nickname !== newNick) {
-      await member.setNickname(newNick);
+      await member.setNickname(newNick).catch(err => {
+        if (err.code === 50013) {
+          console.warn(`권한 부족: ${member.user.tag}`);
+        }
+      });
       console.log(`닉네임 변경: ${member.user.tag} → ${newNick}`);
     }
   } catch (err) {
-    if (err.code === 50013) {
-      console.warn(`권한 부족: ${member.user.tag}`);
-    }
+    console.error("updateNickname error:", err);
   }
 }
 
@@ -242,7 +271,7 @@ client.on("messageCreate", async (message) => {
     );
 
     const data = await res.json();
-    if (!res.ok) throw new Error(data.error?.message);
+    if (!res.ok) throw new Error(data.error?.message || "Gemini 요청 실패");
 
     const answer =
       data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ||
@@ -264,22 +293,56 @@ client.on("messageCreate", async (message) => {
 
 // === 퇴장 로그 ===
 client.on("guildMemberRemove", async (member) => {
-  if (member.guild.id !== MAIN_GUILD_ID) return;
-  const channel = member.guild.channels.cache.get(LEAVE_LOG_CHANNEL);
-  if (!channel) return;
+  try {
+    if (!member.guild || member.guild.id !== MAIN_GUILD_ID) return;
+    const channel = member.guild.channels.cache.get(LEAVE_LOG_CHANNEL);
+    if (!channel) return;
 
-  const embed = new EmbedBuilder()
-    .setTitle("멤버 퇴장")
-    .setColor("#d91e18")
-    .setThumbnail(member.user.displayAvatarURL({ dynamic: true }))
-    .addFields(
-      { name: "유저", value: `${member.user}`, inline: true },
-      { name: "시간", value: `<t:${Math.floor(Date.now() / 1000)}:F>` }
-    );
+    const embed = new EmbedBuilder()
+      .setTitle("멤버 퇴장")
+      .setColor("#d91e18")
+      .setThumbnail(member.user.displayAvatarURL({ dynamic: true }))
+      .addFields(
+        { name: "유저", value: `${member.user}`, inline: true },
+        { name: "시간", value: `<t:${Math.floor(Date.now() / 1000)}:F>` }
+      );
 
-  channel.send({ embeds: [embed] });
+    channel.send({ embeds: [embed] }).catch(() => {});
+  } catch (err) {
+    console.error("guildMemberRemove error:", err);
+  }
 });
 
-client.login(process.env.DISCORD_TOKEN);
+// === 입장 로그 ===
+client.on("guildMemberAdd", async (member) => {
+  try {
+    if (!member.guild || member.guild.id !== MAIN_GUILD_ID) return;
+    const channel = member.guild.channels.cache.get(JOIN_LOG_CHANNEL);
+    if (!channel) return;
 
+    const embed = new EmbedBuilder()
+      .setTitle("멤버 입장")
+      .setColor("#2ecc71")
+      .setThumbnail(member.user.displayAvatarURL({ dynamic: true }))
+      .addFields(
+        { name: "유저", value: `${member.user}`, inline: true },
+        { name: "시간", value: `<t:${Math.floor(Date.now() / 1000)}:F>` }
+      );
 
+    channel.send({ embeds: [embed] }).catch(() => {});
+  } catch (err) {
+    console.error("guildMemberAdd error:", err);
+  }
+});
+
+// === 로그인 처리 ===
+const TOKEN = process.env.DISCORD_TOKEN;
+if (!TOKEN || typeof TOKEN !== "string" || TOKEN.length < 10) {
+  console.error("DISCORD_TOKEN이 설정되어 있지 않거나 잘못되었습니다. .env 파일과 Render의 환경 변수를 확인하세요.");
+  process.exit(1);
+}
+
+client.login(TOKEN).catch(err => {
+  console.error("로그인 실패:", err.message);
+  process.exit(1);
+});
